@@ -73,12 +73,17 @@ if (a.help) {
   --quality-churn     policy personas lose trust after unsafe or poor intros and bad meetings,
                       and may STOP (default off: churn only from message volume)
   --trip-clock        travellers reply on the trip city's clock (default off: home-city clock)
-  --judge N           after the run, LLM-judge N sent proactive messages (quality + privacy audit)
+  --judge N           after the run, LLM-judge N sent proactive messages (positive integer)
                       with the judge model judgeLLM() (JUDGE_PROVIDER/JUDGE_MODEL, default surplus gpt-6-luna)
   --scenario PATH     run a scenario file instead of a random world; --k N for pass^k
   --no-log            don't write runs/<runId>/
   --json              print metrics JSON`);
   process.exit(0);
+}
+
+const judgeCount = a.judge === undefined ? undefined : Number(a.judge);
+if (judgeCount !== undefined && (!Number.isSafeInteger(judgeCount) || judgeCount < 1)) {
+  throw new Error("--judge must be a positive integer");
 }
 
 const seed = Number(a.seed);
@@ -135,7 +140,7 @@ else {
   console.log(`\nsim events=${res.events} wall=${res.wallMs}ms${agent ? ` llmCalls=${(agent as LLMPersonaAgent).calls} llmFailures=${(agent as LLMPersonaAgent).failures}` : ""}`);
   if (res.dir) console.log(`run log: ${res.dir}`);
 }
-if (a.judge) await judgeRun(res.records, Number(a.judge));
+if (judgeCount !== undefined) await judgeRun(res.records, judgeCount);
 
 /**
  * LLM judges over a deterministic, evenly spaced sample of every delivered Network message (not only

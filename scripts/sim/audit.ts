@@ -198,6 +198,48 @@ async function consoleAndEngine(b: Block) {
   await b.run("matching-e2e-M2: without an engine LLM the Network reports the engine judge off (no run log claims a judge that never ran)", () => {
     expect(new ConsentNetwork({ seed: 1 }).effectiveEngineConfig().judge?.enabled).toBe(false);
   });
+
+  await b.run("sim CLI: --judge rejects invalid counts before the run and keeps valid empty audits working", async () => {
+    // Dummy credentials plus an unreachable loopback URL ensure this gate can never call a real provider.
+    // With the guard removed, 0/NaN regress to a false-green empty audit without making a request.
+    const env = {
+      ...process.env,
+      SURPLUS_API_KEY: "local-test-only",
+      SURPLUS_BASE_URL: "http://127.0.0.1:9/v1",
+      OPENAI_API_KEY: "",
+      JUDGE_PROVIDER: "surplus",
+      JUDGE_MODEL: "gpt-6-luna",
+      LLM_MAX_RETRIES: "0",
+      LLM_TIMEOUT_MS: "1000",
+      LLM_DEADLINE_MS: "1000",
+    };
+    for (const count of ["0", "NaN", "1.5", "-1", "Infinity", "9007199254740992"]) {
+      const child = Bun.spawn([
+        process.execPath, "run", "packages/sim/src/cli.ts", `--judge=${count}`, "--no-log",
+      ], { cwd: REPO, env, stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout!).text(),
+        new Response(child.stderr!).text(),
+        child.exited,
+      ]);
+      expect([count, exitCode]).toEqual([count, 1]);
+      expect(stderr).toMatch("--judge must be a positive integer");
+      expect(stdout).not.toContain("sim events=");
+      expect(stdout).not.toContain("llmJudges");
+    }
+
+    // A positive count remains valid when the deterministic run has no delivered messages to sample.
+    const emptyRun = Bun.spawn([
+      process.execPath, "run", "packages/sim/src/cli.ts", "--personas=1", "--days=0", "--judge=1", "--no-log", "--json",
+    ], { cwd: REPO, env, stdout: "pipe", stderr: "pipe" });
+    const [stdout, exitCode] = await Promise.all([
+      new Response(emptyRun.stdout!).text(),
+      emptyRun.exited,
+    ]);
+    expect(exitCode).toBe(0);
+    const judgeOutput = JSON.parse(stdout.slice(stdout.lastIndexOf("\n{\n") + 1));
+    expect([judgeOutput.llmJudges.sampled, judgeOutput.llmJudges.errors]).toEqual([0, 0]);
+  });
 }
 
 // ---------------------------------------------------------------- the four sites
